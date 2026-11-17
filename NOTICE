@@ -13,6 +13,9 @@ reusing it outside that purpose may require permission from herdr.
 Fork notice
 ===========
 
-This is a fork of herdr-osx-menubar (HerdrBar) by bigbug16, adapted to the
-herdr-app desktop app (HerdrAppBar). It reads state from `herdr-app ls` and
-`hc events` instead of the herdr TUI's socket and plugin hooks.
+HerdrAppBar is a fork of HerdrBar. bigbug16 wrote it as herdr-topbar
+(https://github.com/bigbug16/herdr-topbar), and Marcel Panse continued it as
+herdr-osx-menubar (https://github.com/marcelpanse/herdr-osx-menubar); this fork
+starts from that repository's commit 9140205. It is adapted to the herdr-app
+desktop app: it reads herdr-app through `herdr-app ls` and `hc events`, and the
+herdr TUI through its socket, and lists the agents of both in one panel.
