@@ -1,18 +1,14 @@
 #!/bin/bash
-# Install the "start at login" LaunchAgent for HerdrBar.
-#
-# The plugin's [[startup]] hook only runs when a herdr server starts, so it
-# cannot put the icon in the menu bar while herdr is closed — which is exactly
-# when the icon is needed to start herdr. This LaunchAgent covers that.
+# Install the "start at login" LaunchAgent for HerdrAppBar.
 set -euo pipefail
 
-APP="${HERDR_TOPBAR_APP:-$HOME/Applications/HerdrBar.app}"
-BINARY="$APP/Contents/MacOS/HerdrBar"
-LABEL="dev.herdr.topbar"
+APP="${HERDRAPPBAR_APP:-$HOME/Applications/HerdrAppBar.app}"
+BINARY="$APP/Contents/MacOS/HerdrAppBar"
+LABEL="dev.herdr.appbar"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
 if [ ! -x "$BINARY" ]; then
-    echo "HerdrBar is not built yet. Run scripts/build.sh first." >&2
+    echo "HerdrAppBar is not installed. Run scripts/build.sh --install first." >&2
     exit 1
 fi
 

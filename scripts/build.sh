@@ -1,32 +1,18 @@
 #!/bin/bash
-# Build HerdrBar.app and install it to ~/Applications.
-#
-# Invoked by the plugin's [[build]] step on `herdr plugin install`. Note that
-# `herdr plugin link` does NOT run build steps, so during local development this
-# has to be run by hand after editing any Swift source.
+# Build HerdrAppBar.app into build/. With --install, also copy it to
+# ~/Applications/HerdrAppBar.app (restarting a running copy).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD="$ROOT/.build"
-APP_NAME="HerdrBar"
-BUNDLE_ID="dev.herdr.topbar"
-VERSION="0.2.0"
-DEST="${HERDR_TOPBAR_DEST:-$HOME/Applications/$APP_NAME.app}"
+BUILD="$ROOT/build"
+APP_NAME="HerdrAppBar"
+CLI_NAME="herdrappbar-open"
+BUNDLE_ID="dev.herdr.appbar"
+VERSION="0.2.0-app.1"
+DEST="$HOME/Applications/$APP_NAME.app"
 
-# This path is later handed to `rm -rf`, and it can be overridden from the
-# environment, so refuse anything that is not an app bundle. Without this a
-# stray HERDR_TOPBAR_DEST (say, $HOME) would delete the wrong tree outright.
-case "$DEST" in
-    *.app) ;;
-    *)
-        echo "Refusing to build: HERDR_TOPBAR_DEST must end in .app (got '$DEST')" >&2
-        exit 1
-        ;;
-esac
-if [ "${DEST%.app}" = "" ] || [ "$DEST" = "/.app" ]; then
-    echo "Refusing to build: HERDR_TOPBAR_DEST is not a valid destination" >&2
-    exit 1
-fi
+INSTALL=0
+[ "${1:-}" = "--install" ] && INSTALL=1
 
 MIN_MACOS="13.0"
 ARCH="$(uname -m)"
@@ -43,21 +29,20 @@ COMMON_FLAGS=(-O -swift-version 5 -target "$TARGET")
 swiftc "${COMMON_FLAGS[@]}" \
     -framework AppKit \
     "$ROOT/Sources/Shared/UnixSocket.swift" \
-    "$ROOT"/Sources/HerdrBar/*.swift \
+    "$ROOT"/Sources/HerdrAppBar/*.swift \
     -o "$BUILD/$APP_NAME"
 
 swiftc "${COMMON_FLAGS[@]}" \
     "$ROOT/Sources/Shared/UnixSocket.swift" \
-    "$ROOT"/Sources/herdrbar-open/*.swift \
-    -o "$BUILD/herdrbar-open"
+    "$ROOT"/Sources/herdrappbar-open/*.swift \
+    -o "$BUILD/$CLI_NAME"
 
 echo "==> Assembling bundle"
 STAGE="$BUILD/$APP_NAME.app"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$BUILD/$APP_NAME" "$STAGE/Contents/MacOS/$APP_NAME"
-cp "$BUILD/herdrbar-open" "$STAGE/Contents/MacOS/herdrbar-open"
+cp "$BUILD/$CLI_NAME" "$STAGE/Contents/MacOS/$CLI_NAME"
 
-# Menu bar artwork, generated from Resources/ram.svg by scripts/make-icon.sh.
 if [ ! -f "$ROOT/Resources/ram.pdf" ]; then
     echo "Resources/ram.pdf is missing — run scripts/make-icon.sh" >&2
     exit 1
@@ -88,11 +73,13 @@ echo "==> Signing (ad-hoc)"
 codesign --force --sign - --identifier "$BUNDLE_ID" "$STAGE" >/dev/null 2>&1 \
     || codesign --force --sign - "$STAGE"
 
+echo "Built $STAGE"
+[ "$INSTALL" -eq 1 ] || exit 0
+
 echo "==> Installing to $DEST"
 WAS_RUNNING=0
 if pgrep -x "$APP_NAME" >/dev/null 2>&1; then
     WAS_RUNNING=1
-    # Replacing a running bundle leaves the old code mapped; stop it first.
     pkill -x "$APP_NAME" || true
     sleep 1
 fi
@@ -105,5 +92,4 @@ if [ "$WAS_RUNNING" -eq 1 ]; then
     echo "==> Relaunching"
     open -g "$DEST"
 fi
-
-echo "Built $DEST"
+echo "Installed $DEST"

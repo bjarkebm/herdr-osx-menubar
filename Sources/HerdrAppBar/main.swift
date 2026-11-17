@@ -1,21 +1,20 @@
 import AppKit
 
-/// HerdrBar — a macOS menu bar companion for herdr.
+/// HerdrAppBar — a macOS menu bar companion for the herdr-app desktop app,
+/// forked from HerdrBar (the herdr TUI companion).
 ///
-/// Left click brings the terminal running herdr to the front. Right click opens
-/// a menu for starting herdr in a folder, jumping to a recent project, and
-/// seeing which agent is waiting for input.
+/// Left click opens the agents panel; right click opens a short menu. State is
+/// read from `herdr-app ls` on a short poll, nudged by `hc events`.
 ///
-/// Note on notifications: herdr already delivers its own (`[ui.toast]`,
-/// `[ui.sound]`). This app posts none and changes none of that configuration —
-/// it only makes an existing "agent is waiting" state easy to spot by animating
-/// the menu bar icon.
+/// This app posts no notifications — it only makes an existing "agent is
+/// waiting" state easy to spot by animating the menu bar icon.
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private var icon: IconController!
     private let panel = AgentsPanel()
     private let events = EventServer()
+    private lazy var herdrEvents = HerdrEvents(hcBinary: config.hcBinary)
     private let agents = AgentWatch()
     private var config = Config.load()
 
@@ -52,18 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.target = self
             button.action = #selector(iconClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-            button.toolTip = "herdr"
+            button.toolTip = "Herdr"
         }
         icon = IconController(statusItem: statusItem)
 
-        events.onEvent = { [weak self] name, data in
-            guard let self else { return }
-            self.agents.apply(event: name, data: data)
-            // AgentWatch only tracks blocked panes, but the badge and the panel
-            // also show working and done — so re-read herdr, coalesced in case
-            // a burst of transitions arrives at once.
-            self.scheduleSnapshotRefresh()
-        }
+        herdrEvents.onChange = { [weak self] in self?.scheduleSnapshotRefresh() }
         events.onOpen = { [weak self] path in
             guard let self else { return }
             ProjectOpener.open(path: path, config: self.config)
@@ -77,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // Asked for explicitly, so open it rather than toggling: a
             // keybinding pressed twice should leave the panel open.
             if !self.panel.isShown { self.panel.show(relativeTo: button) }
+            self.refreshStateAsync()
             self.acknowledgeWaiting()
         }
         events.statusProvider = { [weak self] in self?.statusPayload() ?? [:] }
@@ -87,13 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.panel.refreshIfShown()
         }
 
-        // The panel re-reads herdr each time it asks, so it stays live while
-        // open — and the refresh keeps the icon in step for free.
-        panel.snapshotProvider = { [weak self] in
-            guard let self else { return nil }
-            self.refreshState()
-            return self.snapshot
-        }
+        // Reading herdr-app means spawning CLIs, so the panel draws from the
+        // cached snapshot; the background refresh redraws it when state lands.
+        panel.snapshotProvider = { [weak self] in self?.snapshot }
         panel.onSelectAgent = { [weak self] agent in
             guard let self else { return }
             ProjectOpener.focusAgent(paneId: agent.paneId, workspaceId: agent.workspaceId,
@@ -119,10 +108,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         refreshState()
         startBackgroundRefresh()
+        herdrEvents.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         events.stop()
+        herdrEvents.stop()
     }
 
     // MARK: - Icon interaction
@@ -138,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // waiting, so the blink stops here too.
         if !isRightClick, let button = statusItem.button {
             panel.toggle(relativeTo: button)
+            refreshStateAsync()
             acknowledgeWaiting()
             return
         }
@@ -191,36 +183,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Refresh the herdr-derived state the menu and icon read from.
     private func refreshState() {
         // Short timeout: this runs on the main thread right before the menu is
-        // shown, and a wedged server must not freeze the menu bar.
-        snapshot = HerdrClient.snapshot(timeout: 0.6)
-        serverRunning = snapshot != nil
-        agents.reconcile(with: snapshot)
+        // shown, and a wedged window must not freeze the menu bar.
+        apply(HerdrClient.snapshot(timeout: 1))
+    }
+
+    private func apply(_ newSnapshot: Snapshot?) {
+        snapshot = newSnapshot
+        serverRunning = newSnapshot != nil
+        agents.reconcile(with: newSnapshot)
         refreshIcon()
         panel.refreshIfShown()
     }
 
-    /// herdr's status events cover blocked agents well, but not every state the
-    /// badge shows, and an event can be missed while the app is not running —
-    /// so re-read the whole picture on a slow beat. Twenty seconds is the
-    /// reference plugin's closed-panel cadence.
-    private static let backgroundRefreshInterval: TimeInterval = 20
+    private let refreshQueue = DispatchQueue(label: "dev.herdr.appbar.refresh")
+    private var refreshInFlight = false
+
+    /// Read herdr-app off the main thread; at most one read in flight.
+    private func refreshStateAsync() {
+        guard !refreshInFlight else { return }
+        refreshInFlight = true
+        refreshQueue.async { [weak self] in
+            let fresh = HerdrClient.snapshot(timeout: 2)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.refreshInFlight = false
+                self.apply(fresh)
+            }
+        }
+    }
+
+    /// `hc events` covers agent status changes, but not space and tab layout
+    /// (new spaces, renamed tabs), so `herdr-app ls` is also polled.
+    private static let backgroundRefreshInterval: TimeInterval = 2.5
     private var backgroundRefresh: Timer?
     private var pendingRefresh: Timer?
 
     private func startBackgroundRefresh() {
         let timer = Timer(timeInterval: Self.backgroundRefreshInterval,
                           repeats: true) { [weak self] _ in
-            self?.refreshState()
+            self?.refreshStateAsync()
         }
         RunLoop.main.add(timer, forMode: .common)
         backgroundRefresh = timer
     }
 
-    /// Coalesce a burst of hook events into one snapshot read.
+    /// Coalesce a burst of `hc events` lines into one snapshot read.
     private func scheduleSnapshotRefresh() {
         pendingRefresh?.invalidate()
         let timer = Timer(timeInterval: 0.4, repeats: false) { [weak self] _ in
-            self?.refreshState()
+            self?.refreshStateAsync()
         }
         RunLoop.main.add(timer, forMode: .common)
         pendingRefresh = timer
@@ -265,11 +276,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let count = waiting.count
         statusItem?.button?.toolTip = count == 0
-            ? "herdr"
-            : "herdr — \(count) agent\(count == 1 ? "" : "s") waiting for input"
+            ? "Herdr"
+            : "Herdr — \(count) agent\(count == 1 ? "" : "s") waiting for input"
     }
 
-    /// Machine-readable state, used by `herdrbar-open --status`.
+    /// Machine-readable state, used by `herdrappbar-open --status`.
     private func statusPayload() -> [String: Any] {
         let host = TerminalHost.hostApplication()
         let iconState: String
@@ -286,7 +297,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             "frontmostPid": frontmost?.processIdentifier ?? 0,
             "hostFrontmost": TerminalHost.isHostFrontmost(),
             "blinkTimeoutSeconds": config.blinkTimeoutSeconds,
-            "hostTerminal": host?.bundleIdentifier ?? "",
+            "hostApp": host?.bundleIdentifier ?? "",
             "hostPid": host?.processIdentifier ?? 0,
             // The panel's rows, so `--status` explains what it would show.
             "agents": (snapshot?.agentRows() ?? []).map {
@@ -358,20 +369,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 // a "clicking the icon does nothing" report.
 if CommandLine.arguments.contains("--diagnose") {
     let config = Config.load()
-    print("herdr binary   : \(config.herdrBinary)")
-    print("terminal       : \(config.terminalBundleId)")
-    print("herdr socket   : \(Paths.herdrSocket)")
-    print("server running : \(HerdrClient.isRunning())")
+    print("herdr-app      : \(config.herdrAppBinary)")
+    print("hc             : \(config.hcBinary)")
+    print("window running : \(HerdrClient.isRunning())")
 
     if let host = TerminalHost.hostApplication(useCache: false) {
-        print("host terminal  : \(host.localizedName ?? "?") "
+        print("app            : \(host.localizedName ?? "?") "
             + "(\(host.bundleIdentifier ?? "?"), pid \(host.processIdentifier))")
     } else {
-        print("host terminal  : none — no attached herdr client found")
+        print("app            : \(config.appBundleId) not running")
     }
 
     if let snapshot = HerdrClient.snapshot() {
-        print("workspaces     : \(snapshot.workspaces.count)")
+        print("spaces         : \(snapshot.workspaces.count)")
         for workspace in snapshot.workspaces {
             let path = snapshot.projectPath(for: workspace.workspaceId) ?? "-"
             print("  \(workspace.label)  \(path)")

@@ -1,8 +1,8 @@
 import Foundation
 
-/// Listens on HerdrBar's own unix socket for messages pushed in from outside
-/// the app: forwarded herdr hook events, and open-project requests from the
-/// `herdrbar-open` CLI.
+/// Listens on HerdrAppBar's own unix socket for requests from the
+/// `herdrappbar-open` CLI: open a folder, show the panel or picker, or report
+/// status. (herdr-app state itself comes from `HerdrEvents`, not from here.)
 ///
 /// Runs its accept loop on a dedicated thread and hands every decoded message
 /// to the main queue, since all consumers touch AppKit state.
@@ -10,15 +10,13 @@ final class EventServer {
 
     private var listenFd: Int32 = -1
     private var running = false
-    private let workers = DispatchQueue(label: "dev.herdr.topbar.events", attributes: .concurrent)
+    private let workers = DispatchQueue(label: "dev.herdr.appbar.events", attributes: .concurrent)
 
-    /// (event name, event payload)
-    var onEvent: ((String, [String: Any]) -> Void)?
     /// Absolute path to open in herdr.
     var onOpen: ((String) -> Void)?
-    /// Show the folder picker (the `open-picker` plugin action).
+    /// Show the folder picker.
     var onPicker: (() -> Void)?
-    /// Show the agents panel (the `open-panel` plugin action).
+    /// Show the agents panel.
     var onPanel: (() -> Void)?
     /// Current app state, answered synchronously to a `status` request.
     var statusProvider: (() -> [String: Any])?
@@ -32,7 +30,7 @@ final class EventServer {
         running = true
 
         let thread = Thread { [weak self] in self?.acceptLoop() }
-        thread.name = "dev.herdr.topbar.accept"
+        thread.name = "dev.herdr.appbar.accept"
         thread.start()
         return true
     }
@@ -71,11 +69,6 @@ final class EventServer {
         else { return }
 
         switch message["kind"] as? String {
-        case "event":
-            guard let name = message["event"] as? String else { return }
-            let data = message["data"] as? [String: Any] ?? [:]
-            DispatchQueue.main.async { [weak self] in self?.onEvent?(name, data) }
-
         case "open":
             guard let path = message["path"] as? String, !path.isEmpty else { return }
             DispatchQueue.main.async { [weak self] in self?.onOpen?(path) }

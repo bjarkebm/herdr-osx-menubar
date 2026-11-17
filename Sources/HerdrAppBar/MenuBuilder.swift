@@ -46,7 +46,7 @@ enum MenuBuilder {
         // Only when there is nothing to go back to; with herdr already up, the
         // panel and its rows are the way in.
         if !hasClient {
-            menu.addItem(BlockMenuItem(title: "Start herdr", handler: actions.startHerdr))
+            menu.addItem(BlockMenuItem(title: "Open Herdr", handler: actions.startHerdr))
         }
 
         // MARK: Waiting agents
@@ -80,7 +80,7 @@ enum MenuBuilder {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        menu.addItem(BlockMenuItem(title: "Quit HerdrBar", keyEquivalent: "q",
+        menu.addItem(BlockMenuItem(title: "Quit HerdrAppBar", keyEquivalent: "q",
                                    handler: actions.quit))
         return menu
     }

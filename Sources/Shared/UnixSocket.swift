@@ -1,17 +1,8 @@
 import Foundation
 
-/// Shared POSIX unix-domain-socket helpers.
-///
-/// Both endpoints this tool talks to speak the same shape — newline-delimited
-/// JSON, one JSON object per line:
-///   * herdr's own API socket (`~/.config/herdr/herdr.sock`), verified against
-///     herdr 0.8.0: `{"id":..,"method":..,"params":{..}}\n` in, one response
-///     line out.
-///   * HerdrBar's own event socket, which the plugin hooks and `herdrbar-open`
-///     write to.
-///
-/// Everything here is blocking with an explicit timeout: callers run it off the
-/// main thread, and a hung herdr server must never freeze the menu bar.
+/// Shared POSIX unix-domain-socket helpers for HerdrAppBar's own socket,
+/// which `herdrappbar-open` writes to: newline-delimited JSON, one object per
+/// line, blocking with an explicit timeout.
 enum UnixSocket {
 
     /// `sun_path` is a fixed 104-byte buffer on Darwin; longer paths cannot be
@@ -116,7 +107,6 @@ enum UnixSocket {
         return out
     }
 
-    /// One request, one response, one connection — the pattern herdr's API uses.
     static func request(path: String, json: [String: Any], timeout: TimeInterval = 3) -> [String: Any]? {
         guard let fd = connect(path: path, timeout: timeout) else { return nil }
         defer { close(fd) }
@@ -126,7 +116,6 @@ enum UnixSocket {
         return try? JSONSerialization.jsonObject(with: line) as? [String: Any]
     }
 
-    /// Fire-and-forget: used by hooks, which must not block herdr's event loop.
     @discardableResult
     static func send(path: String, json: [String: Any], timeout: TimeInterval = 1) -> Bool {
         guard let fd = connect(path: path, timeout: timeout) else { return false }
@@ -137,19 +126,14 @@ enum UnixSocket {
     }
 }
 
-/// Filesystem locations shared by the app, the CLI, and the hook scripts.
+/// Filesystem locations shared by the app and the CLI.
 enum Paths {
     static var supportDir: String {
-        NSHomeDirectory() + "/Library/Application Support/dev.herdr.topbar"
+        NSHomeDirectory() + "/Library/Application Support/dev.herdr.appbar"
     }
+
     static var barSocket: String { supportDir + "/bar.sock" }
     static var configFile: String { supportDir + "/config.json" }
-    static var launchScript: String { supportDir + "/launch.command" }
-
-    static var herdrSocket: String {
-        if let p = ProcessInfo.processInfo.environment["HERDR_SOCKET_PATH"], !p.isEmpty { return p }
-        return NSHomeDirectory() + "/.config/herdr/herdr.sock"
-    }
 
     static func ensureSupportDir() {
         try? FileManager.default.createDirectory(

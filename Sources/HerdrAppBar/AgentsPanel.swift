@@ -324,7 +324,7 @@ final class PanelContentView: NSView {
     /// Lays out one block per workspace and answers the total height used.
     private func layoutGroups(_ groups: [PanelGroup]) -> CGFloat {
         guard !groups.isEmpty else {
-            return layoutMessage("no workspaces open")
+            return layoutMessage("no spaces open")
         }
 
         var y: CGFloat = 0
@@ -354,9 +354,9 @@ final class PanelContentView: NSView {
     }
 
     private func layoutNotRunning() -> CGFloat {
-        var y = layoutMessage("herdr is not running")
+        var y = layoutMessage("Herdr is not running")
         let start = PanelActionRow(
-            title: "start herdr",
+            title: "open Herdr",
             frame: NSRect(x: 0, y: y, width: PanelTheme.width,
                           height: PanelTheme.agentHeight)
         ) { [weak self] in self?.onStartHerdr?() }
@@ -376,16 +376,16 @@ final class PanelContentView: NSView {
 
     // MARK: Header
 
-    private var titleText = "herdr"
+    private var titleText = "Herdr"
 
     private func titleLine(snapshot: Snapshot?, groups: [PanelGroup],
                            running: Bool) -> String {
-        guard running else { return "herdr (not running)" }
+        guard running else { return "Herdr (not running)" }
         let workspaces = groups.count
         let agents = groups.reduce(0) { $0 + $1.agents.count }
-        let workspaceWord = workspaces == 1 ? "workspace" : "workspaces"
+        let workspaceWord = workspaces == 1 ? "space" : "spaces"
         let agentWord = agents == 1 ? "agent" : "agents"
-        return "herdr (\(workspaces) \(workspaceWord), \(agents) \(agentWord))"
+        return "Herdr (\(workspaces) \(workspaceWord), \(agents) \(agentWord))"
     }
 
     override func draw(_ dirtyRect: NSRect) {

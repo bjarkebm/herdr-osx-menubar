@@ -9,3 +9,10 @@ herdr's logo, retrieved from https://herdr.dev/assets/ram.svg. It is included
 solely to identify the tool this plugin extends, and remains the property of
 its owner. It is not licensed under the MIT terms, and redistributing or
 reusing it outside that purpose may require permission from herdr.
+
+Fork notice
+===========
+
+This is a fork of herdr-osx-menubar (HerdrBar) by bigbug16, adapted to the
+herdr-app desktop app (HerdrAppBar). It reads state from `herdr-app ls` and
+`hc events` instead of the herdr TUI's socket and plugin hooks.

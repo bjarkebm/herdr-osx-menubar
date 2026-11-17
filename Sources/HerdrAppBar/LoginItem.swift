@@ -2,16 +2,12 @@ import Foundation
 
 /// "Start at Login", implemented as a per-user LaunchAgent.
 ///
-/// This is what keeps the menu bar icon present while herdr is not running —
-/// the plugin's `[[startup]]` hook only fires when a herdr server starts, which
-/// is exactly the case the icon needs to cover.
-///
 /// A LaunchAgent plist is used rather than `SMAppService` because this app is
 /// built and ad-hoc signed locally; the launchd path behaves predictably for an
 /// unsigned local build and is easy to inspect with `launchctl print`.
 enum LoginItem {
 
-    static let label = "dev.herdr.topbar"
+    static let label = "dev.herdr.appbar"
 
     static var plistPath: String {
         NSHomeDirectory() + "/Library/LaunchAgents/\(label).plist"
