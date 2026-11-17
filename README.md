@@ -32,8 +32,10 @@ workspace, and every agent in them with what it is working on and how it is doin
 ```
 
 - **Sources.** herdr-app spaces come first, then TUI workspaces. Each header is
-  tagged `Herdr` or `Herdr TUI` (the tooltip says it too). Whichever app isn't
-  running is left out; "Herdr is not running" shows only when neither answers.
+  tagged `Herdr` or `Herdr TUI` (the tooltip says it too). An app that isn't
+  running, or that has no agents while the other has some, is left out. When
+  neither has agents, the spaces of both are shown; "Herdr is not running" shows
+  only when neither answers.
 - **Space header**: its name, bold when that app is currently showing it, and a
   summary on the right: how many agents share the loudest status, then the total.
   Clicking it switches to that space.
@@ -225,7 +227,7 @@ pulling HerdrAppBar forward.
 # What can the app see? One section per source: running or not, host app, spaces, agents
 ~/Applications/HerdrAppBar.app/Contents/MacOS/HerdrAppBar --diagnose
 
-# Live state as JSON, including exactly the agents the panel would show
+# Live state as JSON, including exactly the spaces and agents the panel would show
 ~/Applications/HerdrAppBar.app/Contents/MacOS/herdrappbar-open --status
 
 # Open the agents panel, or the folder picker, without clicking the icon

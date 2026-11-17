@@ -310,6 +310,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return [
             "serverRunning": serverRunning,
             "sources": (snapshot?.sources ?? []).map(\.rawValue),
+            // The spaces the panel lists, after leaving out a source with no agents.
+            "panel": (snapshot?.panelGroups() ?? []).map { group in
+                ["source": group.source.rawValue, "space": group.label, "agents": group.agents.count] as [String: Any]
+            },
             "iconState": iconState,
             "frontmostApp": frontmost?.bundleIdentifier ?? "",
             "frontmostPid": frontmost?.processIdentifier ?? 0,

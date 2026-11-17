@@ -89,11 +89,16 @@ extension Snapshot {
     ///
     /// Workspaces with no agents are kept — that is the reference plugin's
     /// point, that a session you cannot see is still there — and render dimmed
-    /// with nothing below them.
+    /// with nothing below them. A whole source with no agents is left out while
+    /// the other has some, so a herdr you aren't using doesn't take up the
+    /// panel; when neither has agents, both are shown.
     func panelGroups() -> [PanelGroup] {
         let byWorkspace = Dictionary(grouping: agents, by: \.workspaceId)
+        let sourceOf = Dictionary(workspaces.map { ($0.workspaceId, $0.source) }, uniquingKeysWith: { first, _ in first })
+        let busy = Set(agents.compactMap { sourceOf[$0.workspaceId] })
+        let shown = busy.isEmpty ? workspaces : workspaces.filter { busy.contains($0.source) }
 
-        return workspaces.sorted { $0.sortKey < $1.sortKey }.map { workspace in
+        return shown.sorted { $0.sortKey < $1.sortKey }.map { workspace in
             let members = (byWorkspace[workspace.workspaceId] ?? []).sorted {
                 // Loudest first, so what needs attention is never below the
                 // fold of a long workspace.
