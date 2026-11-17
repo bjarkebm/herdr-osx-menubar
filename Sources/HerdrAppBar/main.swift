@@ -1,10 +1,11 @@
 import AppKit
 
-/// HerdrAppBar — a macOS menu bar companion for the herdr-app desktop app,
-/// forked from HerdrBar (the herdr TUI companion).
+/// HerdrAppBar — a macOS menu bar companion for the herdr-app desktop app and
+/// the herdr TUI, forked from HerdrBar (the herdr TUI companion).
 ///
 /// Left click opens the agents panel; right click opens a short menu. State is
-/// read from `herdr-app ls` on a short poll, nudged by `hc events`.
+/// read from both sources on a short poll — `herdr-app ls` and the TUI's
+/// `session.snapshot` — and nudged by `hc events`.
 ///
 /// This app posts no notifications — it only makes an existing "agent is
 /// waiting" state easy to spot by animating the menu bar icon.
@@ -96,8 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         panel.onStartHerdr = { [weak self] in
             guard let self else { return }
-            TerminalHost.launchHerdr(cwd: nil, config: self.config)
-            TerminalHost.invalidateHostCache()
+            AppHost.launchHerdr(cwd: nil, config: self.config)
         }
 
         // Bringing herdr forward by any route — this icon, Cmd-Tab, clicking
@@ -141,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showMenu() {
         let menu = MenuBuilder.build(
             waiting: agents.sorted,
-            hasClient: TerminalHost.hasVisibleClient(),
+            hasClient: AppHost.hasVisibleClient() || TerminalHost.hasVisibleClient(),
             blinkTimeout: config.blinkTimeoutSeconds,
             actions: menuActions())
         menu.delegate = self
@@ -157,8 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         MenuActions(
             startHerdr: { [weak self] in
                 guard let self else { return }
-                TerminalHost.launchHerdr(cwd: nil, config: self.config)
-                TerminalHost.invalidateHostCache()
+                AppHost.launchHerdr(cwd: nil, config: self.config)
             },
             focusAgent: { [weak self] paneId, workspaceId in
                 guard let self else { return }
@@ -184,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshState() {
         // Short timeout: this runs on the main thread right before the menu is
         // shown, and a wedged window must not freeze the menu bar.
-        apply(HerdrClient.snapshot(timeout: 1))
+        apply(Snapshot.gather(timeout: 1))
     }
 
     private func apply(_ newSnapshot: Snapshot?) {
@@ -198,12 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let refreshQueue = DispatchQueue(label: "dev.herdr.appbar.refresh")
     private var refreshInFlight = false
 
-    /// Read herdr-app off the main thread; at most one read in flight.
+    /// Read both sources off the main thread; at most one read in flight.
     private func refreshStateAsync() {
         guard !refreshInFlight else { return }
         refreshInFlight = true
         refreshQueue.async { [weak self] in
-            let fresh = HerdrClient.snapshot(timeout: 2)
+            let fresh = Snapshot.gather(timeout: 2)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.refreshInFlight = false
@@ -212,8 +211,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// `hc events` covers agent status changes, but not space and tab layout
-    /// (new spaces, renamed tabs), so `herdr-app ls` is also polled.
+    /// `hc events` covers herdr-app agent status changes, but not space and
+    /// tab layout (new spaces, renamed tabs), so `herdr-app ls` is also polled.
+    /// The TUI has no push channel without its plugin hooks, so this poll is
+    /// also what keeps the TUI source live.
     private static let backgroundRefreshInterval: TimeInterval = 2.5
     private var backgroundRefresh: Timer?
     private var pendingRefresh: Timer?
@@ -243,11 +244,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // set cannot grow without bound.
         acknowledged.formIntersection(waiting)
 
-        // The flash means "look at herdr". If herdr is already the frontmost
-        // app, that has happened — there is no activation notification coming,
-        // because no activation is needed.
-        if !waiting.isEmpty && TerminalHost.isHostFrontmost() {
-            acknowledged.formUnion(waiting)
+        // The flash means "look at herdr". If the herdr hosting a waiting
+        // agent is already the frontmost app, that has happened — there is no
+        // activation notification coming, because no activation is needed.
+        for source in HerdrSource.allCases {
+            let mine = waiting.filter { HerdrSource.untag($0)?.source == source }
+            if !mine.isEmpty && Self.isHostFrontmost(source) {
+                acknowledged.formUnion(mine)
+            }
         }
 
         let flashing = !waiting.isEmpty && !waiting.isSubset(of: acknowledged)
@@ -280,9 +284,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             : "Herdr — \(count) agent\(count == 1 ? "" : "s") waiting for input"
     }
 
+    private static func isHostFrontmost(_ source: HerdrSource) -> Bool {
+        switch source {
+        case .app: return AppHost.isHostFrontmost()
+        case .tui: return TerminalHost.isHostFrontmost()
+        }
+    }
+
+    private static func hostApplication(_ source: HerdrSource) -> NSRunningApplication? {
+        switch source {
+        case .app: return AppHost.hostApplication()
+        case .tui: return TerminalHost.hostApplication()
+        }
+    }
+
     /// Machine-readable state, used by `herdrappbar-open --status`.
     private func statusPayload() -> [String: Any] {
-        let host = TerminalHost.hostApplication()
         let iconState: String
         switch icon.state {
         case .idle: iconState = "idle"
@@ -292,13 +309,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let frontmost = NSWorkspace.shared.frontmostApplication
         return [
             "serverRunning": serverRunning,
+            "sources": (snapshot?.sources ?? []).map(\.rawValue),
             "iconState": iconState,
             "frontmostApp": frontmost?.bundleIdentifier ?? "",
             "frontmostPid": frontmost?.processIdentifier ?? 0,
-            "hostFrontmost": TerminalHost.isHostFrontmost(),
             "blinkTimeoutSeconds": config.blinkTimeoutSeconds,
-            "hostApp": host?.bundleIdentifier ?? "",
-            "hostPid": host?.processIdentifier ?? 0,
+            "hosts": Dictionary(uniqueKeysWithValues: HerdrSource.allCases.map { source in
+                let host = Self.hostApplication(source)
+                return (source.rawValue, [
+                    "app": host?.bundleIdentifier ?? "",
+                    "pid": host?.processIdentifier ?? 0,
+                    "frontmost": Self.isHostFrontmost(source),
+                ] as [String: Any])
+            }),
             // The panel's rows, so `--status` explains what it would show.
             "agents": (snapshot?.agentRows() ?? []).map {
                 [
@@ -348,11 +371,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func appActivated(_ notification: Notification) {
         guard !agents.isEmpty,
               let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
-                  as? NSRunningApplication,
-              let host = TerminalHost.hostApplication(),
-              activated.processIdentifier == host.processIdentifier
+                  as? NSRunningApplication
         else { return }
-        acknowledgeWaiting()
+        let sources = Set(agents.waiting.keys.compactMap { HerdrSource.untag($0)?.source })
+        let isHost = sources.contains {
+            Self.hostApplication($0)?.processIdentifier == activated.processIdentifier
+        }
+        if isHost { acknowledgeWaiting() }
     }
 
     // MARK: - Menu delegate
@@ -365,26 +390,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 // `--diagnose` reports what the app can see, without touching the menu bar.
-// Host detection walks the process tree, so this is the fastest way to explain
-// a "clicking the icon does nothing" report.
+// TUI host detection walks the process tree, so this is the fastest way to
+// explain a "clicking the icon does nothing" report.
 if CommandLine.arguments.contains("--diagnose") {
     let config = Config.load()
     print("herdr-app      : \(config.herdrAppBinary)")
     print("hc             : \(config.hcBinary)")
-    print("window running : \(HerdrClient.isRunning())")
+    print("herdr (TUI)    : \(config.herdrBinary)")
+    print("TUI socket     : \(config.tuiSocket)")
 
-    if let host = TerminalHost.hostApplication(useCache: false) {
-        print("app            : \(host.localizedName ?? "?") "
-            + "(\(host.bundleIdentifier ?? "?"), pid \(host.processIdentifier))")
-    } else {
-        print("app            : \(config.appBundleId) not running")
-    }
-
-    if let snapshot = HerdrClient.snapshot() {
+    for source in HerdrSource.allCases {
+        print("")
+        let host: NSRunningApplication?
+        switch source {
+        case .app: host = AppHost.hostApplication()
+        case .tui: host = TerminalHost.hostApplication(useCache: false)
+        }
+        let hostLine = host.map {
+            "\($0.localizedName ?? "?") (\($0.bundleIdentifier ?? "?"), pid \($0.processIdentifier))"
+        } ?? "none"
+        guard let snapshot = source.snapshot(timeout: 3)?.tagged(source) else {
+            print("[\(source.title)] not running   host: \(hostLine)")
+            continue
+        }
+        print("[\(source.title)] running   host: \(hostLine)")
         print("spaces         : \(snapshot.workspaces.count)")
         for workspace in snapshot.workspaces {
             let path = snapshot.projectPath(for: workspace.workspaceId) ?? "-"
-            print("  \(workspace.label)  \(path)")
+            let mark = snapshot.focusedWorkspaceIds.contains(workspace.workspaceId) ? "▸" : " "
+            print("  \(mark) \(workspace.label)  \(path)  [\(workspace.workspaceId)]")
         }
         let rows = snapshot.agentRows()
         print("agents         : \(rows.count)")

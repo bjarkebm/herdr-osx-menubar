@@ -59,6 +59,7 @@ struct PanelAgent: Equatable {
 struct PanelGroup: Equatable {
     let workspaceId: String
     let label: String
+    let source: HerdrSource
     /// True when herdr is showing this workspace — drawn bold, as the reference
     /// does for a session that already has a window on screen.
     let focused: Bool
@@ -92,7 +93,7 @@ extension Snapshot {
     func panelGroups() -> [PanelGroup] {
         let byWorkspace = Dictionary(grouping: agents, by: \.workspaceId)
 
-        return workspaces.sorted { $0.number < $1.number }.map { workspace in
+        return workspaces.sorted { $0.sortKey < $1.sortKey }.map { workspace in
             let members = (byWorkspace[workspace.workspaceId] ?? []).sorted {
                 // Loudest first, so what needs attention is never below the
                 // fold of a long workspace.
@@ -105,7 +106,8 @@ extension Snapshot {
             return PanelGroup(
                 workspaceId: workspace.workspaceId,
                 label: workspace.label,
-                focused: workspace.workspaceId == focusedWorkspaceId,
+                source: workspace.source,
+                focused: focusedWorkspaceIds.contains(workspace.workspaceId),
                 detail: detailLine(for: workspace, agents: members),
                 agents: members.map { agent in
                     PanelAgent(

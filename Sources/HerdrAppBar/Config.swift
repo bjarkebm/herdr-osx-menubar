@@ -9,6 +9,14 @@ struct Config {
     var hcBinary: String = NSHomeDirectory() + "/.local/bin/hc"
     var appBundleId: String = "dev.herdr.app"
 
+    /// The herdr TUI: its API socket, the binary a new terminal window runs,
+    /// and the terminal app that window opens in. The socket path is fixed
+    /// rather than read from `HERDR_SOCKET_PATH`: herdr-app terminals inherit
+    /// stale TUI variables, and a GUI app should not trust its environment.
+    var tuiSocket: String = NSHomeDirectory() + "/.config/herdr/herdr.sock"
+    var herdrBinary: String = ""
+    var terminalBundleId: String = "com.apple.Terminal"
+
     /// How long the icon keeps blinking for a waiting agent before it settles
     /// to the static badge. `0` means "keep blinking until clicked".
     var blinkTimeoutSeconds: Int = Config.defaultBlinkTimeout
@@ -33,10 +41,14 @@ struct Config {
             if let b = json["herdrAppBinary"] as? String, !b.isEmpty { config.herdrAppBinary = b }
             if let b = json["hcBinary"] as? String, !b.isEmpty { config.hcBinary = b }
             if let b = json["appBundleId"] as? String, !b.isEmpty { config.appBundleId = b }
+            if let p = json["tuiSocket"] as? String, !p.isEmpty { config.tuiSocket = p }
+            if let b = json["herdrBinary"] as? String { config.herdrBinary = b }
+            if let t = json["terminalBundleId"] as? String, !t.isEmpty { config.terminalBundleId = t }
             if let t = json["blinkTimeoutSeconds"] as? Int, t >= 0 {
                 config.blinkTimeoutSeconds = t
             }
         }
+        if config.herdrBinary.isEmpty { config.herdrBinary = Config.locateHerdr() }
         return config
     }
 
@@ -46,6 +58,9 @@ struct Config {
             "herdrAppBinary": herdrAppBinary,
             "hcBinary": hcBinary,
             "appBundleId": appBundleId,
+            "tuiSocket": tuiSocket,
+            "herdrBinary": herdrBinary,
+            "terminalBundleId": terminalBundleId,
             "blinkTimeoutSeconds": blinkTimeoutSeconds,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: json,
@@ -53,5 +68,21 @@ struct Config {
         else { return }
         try? data.write(to: URL(fileURLWithPath: Paths.configFile))
         Config.current = self
+    }
+
+    /// A GUI process gets PATH=/usr/bin:/bin:/usr/sbin:/sbin, which never
+    /// contains herdr, so check the usual install roots.
+    private static func locateHerdr() -> String {
+        let candidates = [
+            "/opt/homebrew/bin/herdr",
+            "/usr/local/bin/herdr",
+            NSHomeDirectory() + "/.local/bin/herdr",
+            "/usr/bin/herdr",
+        ]
+        for path in candidates where FileManager.default.isExecutableFile(atPath: path) {
+            return path
+        }
+        // Last resort: the login shell that runs the launch script resolves it.
+        return "herdr"
     }
 }

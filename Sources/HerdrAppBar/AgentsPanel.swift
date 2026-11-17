@@ -66,6 +66,9 @@ enum PanelTheme {
     static let agentDotCenterX: CGFloat = 48
     static let agentTextX: CGFloat = 60
 
+    /// Space between a workspace's label and its source tag.
+    static let sourceTagGap: CGFloat = 8
+
     static let groupDotDiameter: CGFloat = 8
     static let agentDotDiameter: CGFloat = 6
 
@@ -520,7 +523,8 @@ final class PanelGroupRow: PanelRow {
     init(group: PanelGroup, frame: NSRect, action: @escaping () -> Void) {
         self.group = group
         super.init(frame: frame, action: action)
-        toolTip = group.detail.isEmpty ? group.label : "\(group.label) — \(group.detail)"
+        let name = "\(group.label) (\(group.source.title))"
+        toolTip = group.detail.isEmpty ? name : "\(name) — \(group.detail)"
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -538,14 +542,22 @@ final class PanelGroupRow: PanelRow {
         // session that already has a window up.
         let summary = summaryText(state: state)
         let summaryWidth = summary.size().width
-        let labelWidth = bounds.width - PanelTheme.groupTextX
-            - summaryWidth - PanelTheme.sideInset - 12
-        PanelText.draw(group.label,
-                       font: group.focused ? PanelTheme.groupFont : PanelTheme.groupFontIdle,
-                       color: group.agents.isEmpty ? PanelTheme.dim : PanelTheme.primary,
-                       in: NSRect(x: PanelTheme.groupTextX, y: headerRect.minY,
-                                  width: max(labelWidth, 40), height: headerRect.height),
-                       truncating: true)
+        let tag = PanelText.attributed(group.source.title, font: PanelTheme.detailFont,
+                                       color: PanelTheme.dim)
+        let tagWidth = tag.size().width
+        let labelWidth = max(bounds.width - PanelTheme.groupTextX - summaryWidth
+                                 - PanelTheme.sideInset - 12 - tagWidth
+                                 - PanelTheme.sourceTagGap, 40)
+        let drawnLabel = PanelText.draw(
+            group.label,
+            font: group.focused ? PanelTheme.groupFont : PanelTheme.groupFontIdle,
+            color: group.agents.isEmpty ? PanelTheme.dim : PanelTheme.primary,
+            in: NSRect(x: PanelTheme.groupTextX, y: headerRect.minY,
+                       width: labelWidth, height: headerRect.height),
+            truncating: true)
+        PanelText.draw(tag, in: NSRect(
+            x: PanelTheme.groupTextX + min(drawnLabel, labelWidth) + PanelTheme.sourceTagGap,
+            y: headerRect.minY, width: tagWidth, height: headerRect.height))
 
         PanelText.draw(summary, in: NSRect(
             x: bounds.width - PanelTheme.sideInset - summaryWidth,

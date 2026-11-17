@@ -22,6 +22,8 @@ struct WorkspaceSnapshot {
     let number: Int
     /// Repo root for worktree-backed workspaces; the project path we prefer.
     let repoRoot: String?
+    /// Which herdr this came from; set when sources are merged.
+    var source: HerdrSource = .app
 }
 
 /// A tab as reported by `herdr-app ls`. Only its label is interesting here:
@@ -73,12 +75,23 @@ struct AgentRow: Equatable {
 }
 
 struct Snapshot {
-    let workspaces: [WorkspaceSnapshot]
-    let panes: [PaneSnapshot]
-    let tabs: [TabSnapshot]
-    let agents: [AgentSnapshot]
-    /// What herdr is showing right now — the panel marks it in bold.
-    let focusedWorkspaceId: String?
+    var workspaces: [WorkspaceSnapshot]
+    var panes: [PaneSnapshot]
+    var tabs: [TabSnapshot]
+    var agents: [AgentSnapshot]
+    /// What each herdr is showing right now — the panel marks it in bold.
+    var focusedWorkspaceIds: Set<String>
+    /// The sources that answered.
+    var sources: [HerdrSource] = []
+
+    init(workspaces: [WorkspaceSnapshot], panes: [PaneSnapshot], tabs: [TabSnapshot],
+         agents: [AgentSnapshot], focusedWorkspaceId: String?) {
+        self.workspaces = workspaces
+        self.panes = panes
+        self.tabs = tabs
+        self.agents = agents
+        self.focusedWorkspaceIds = focusedWorkspaceId.map { [$0] } ?? []
+    }
 
     func workspace(_ id: String) -> WorkspaceSnapshot? {
         workspaces.first { $0.workspaceId == id }
@@ -100,7 +113,7 @@ struct Snapshot {
     /// then by pane — so a row never moves unless herdr's layout does.
     func agentRows() -> [AgentRow] {
         let workspaceOrder = Dictionary(
-            workspaces.map { ($0.workspaceId, $0.number) }, uniquingKeysWith: { a, _ in a })
+            workspaces.map { ($0.workspaceId, $0.sortKey) }, uniquingKeysWith: { a, _ in a })
         let tabOrder = Dictionary(
             tabs.map { ($0.tabId, $0.number) }, uniquingKeysWith: { a, _ in a })
 

@@ -93,16 +93,21 @@ enum UnixSocket {
         return true
     }
 
-    /// Read bytes up to and including the next `\n`. Returns nil on timeout or
-    /// a peer that closed before sending a full line.
+    /// Read up to the next `\n` and return the line without it. Returns nil on
+    /// timeout or a peer that closed before sending anything. Reads in chunks:
+    /// every connection here carries a single line, so nothing after the
+    /// newline is lost.
     static func readLine(_ fd: Int32, limit: Int = 8 * 1024 * 1024) -> Data? {
         var out = Data()
-        var byte: UInt8 = 0
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
         while out.count < limit {
-            let n = Darwin.recv(fd, &byte, 1, 0)
+            let n = chunk.withUnsafeMutableBytes { Darwin.recv(fd, $0.baseAddress, $0.count, 0) }
             if n <= 0 { return out.isEmpty ? nil : out }
-            if byte == 0x0A { return out }
-            out.append(byte)
+            if let newline = chunk[0 ..< n].firstIndex(of: 0x0A) {
+                out.append(contentsOf: chunk[0 ..< newline])
+                return out
+            }
+            out.append(contentsOf: chunk[0 ..< n])
         }
         return out
     }
